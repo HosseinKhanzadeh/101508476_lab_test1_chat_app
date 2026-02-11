@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const connectDB = require('./db');
 const User = require('./models/User');
+const GroupMessage = require('./models/GroupMessage');
 const authRoutes = require('./routes/auth');
 
 const app = express();
@@ -45,9 +46,71 @@ app.get('/db-test', async (req, res) => {
     }
 });
 
+/** Last 50 group messages for a room, newest first */
+app.get('/api/messages/group/:room', async (req, res) => {
+    try {
+        const room = decodeURIComponent(req.params.room || '').trim();
+        if (!room) {
+            return res.status(400).json({ error: 'Room name required' });
+        }
+        const messages = await GroupMessage.find({ room })
+            .sort({ _id: -1 })
+            .limit(50)
+            .lean();
+        res.json(messages.reverse());
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/** MM-DD-YYYY HH:MM PM */
+function getDateSent() {
+    const d = new Date();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const year = d.getFullYear();
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    return `${month}-${day}-${year} ${hours}:${minutes} ${ampm}`;
+}
+
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
-    
+
+    socket.on('join_room', (data) => {
+        const room = (data && data.room && String(data.room).trim()) || '';
+        const username = (data && data.username && String(data.username).trim()) || '';
+        if (room && username) {
+            socket.join(room);
+        }
+    });
+
+    socket.on('leave_room', (data) => {
+        const room = (data && data.room && String(data.room).trim()) || '';
+        if (room) {
+            socket.leave(room);
+        }
+    });
+
+    socket.on('room_message', async (data) => {
+        const room = (data && data.room && String(data.room).trim()) || '';
+        const from_user = (data && data.from_user && String(data.from_user).trim()) || '';
+        const message = (data && data.message != null) ? String(data.message).trim() : '';
+        if (!room || !from_user || !message) {
+            return;
+        }
+        const date_sent = getDateSent();
+        try {
+            await GroupMessage.create({ from_user, room, message, date_sent });
+        } catch (err) {
+            console.error('GroupMessage save error:', err.message);
+            return;
+        }
+        io.to(room).emit('room_message', { room, from_user, message, date_sent });
+    });
+
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
     });
