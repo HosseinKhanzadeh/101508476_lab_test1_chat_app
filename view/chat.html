@@ -55,6 +55,27 @@
                             <input type="text" class="form-control" id="messageInput" placeholder="Type a message..." disabled>
                             <button class="btn btn-primary" type="button" id="sendBtn" disabled>Send</button>
                         </div>
+
+                        <hr class="my-4">
+                        <h6 class="mb-2">Private Chat (1-to-1)</h6>
+                        <div class="mb-2 row align-items-end">
+                            <div class="col-md-4">
+                                <label for="toUserInput" class="form-label">Message user</label>
+                                <input type="text" class="form-control" id="toUserInput" placeholder="Username">
+                            </div>
+                            <div class="col-md-4 mt-2 mt-md-0">
+                                <button type="button" class="btn btn-outline-primary" id="loadDmHistoryBtn">Load DM History</button>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label id="dmLabel" class="form-label text-muted">DM with: —</label>
+                            <div id="dmMessageList" class="border rounded p-3 bg-white" style="min-height: 160px; max-height: 240px; overflow-y: auto;"></div>
+                            <div id="dmTypingIndicator" class="small text-muted mt-1" style="min-height: 1.2em;"></div>
+                        </div>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="dmMessageInput" placeholder="Type a private message...">
+                            <button class="btn btn-success" type="button" id="sendDmBtn">Send Private</button>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -6,6 +6,7 @@ const path = require('path');
 const connectDB = require('./db');
 const User = require('./models/User');
 const GroupMessage = require('./models/GroupMessage');
+const PrivateMessage = require('./models/PrivateMessage');
 const authRoutes = require('./routes/auth');
 
 const app = express();
@@ -46,7 +47,29 @@ app.get('/db-test', async (req, res) => {
     }
 });
 
-/** Last 50 group messages for a room, newest first */
+/** Last 50 private messages between me and otherUser, oldest→newest. Query: ?me=<myUsername> */
+app.get('/api/messages/private/:otherUser', async (req, res) => {
+    try {
+        const me = (req.query.me && String(req.query.me).trim()) || '';
+        const otherUser = decodeURIComponent(req.params.otherUser || '').trim();
+        if (!me || !otherUser) {
+            return res.status(400).json({ error: 'Query me and otherUser required' });
+        }
+        const messages = await PrivateMessage.find({
+            $or: [
+                { from_user: me, to_user: otherUser },
+                { from_user: otherUser, to_user: me }
+            ]
+        })
+            .sort({ _id: 1 })
+            .limit(50)
+            .lean();
+        res.json(messages);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/api/messages/group/:room', async (req, res) => {
     try {
         const room = decodeURIComponent(req.params.room || '').trim();
@@ -63,6 +86,8 @@ app.get('/api/messages/group/:room', async (req, res) => {
     }
 });
 
+const userSockets = new Map();
+
 /** MM-DD-YYYY HH:MM PM */
 function getDateSent() {
     const d = new Date();
@@ -78,6 +103,14 @@ function getDateSent() {
 
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
+
+    socket.on('register_user', (username) => {
+        const u = (username != null && username !== '') ? String(username).trim() : '';
+        if (u) {
+            userSockets.set(u, socket.id);
+            socket.username = u;
+        }
+    });
 
     socket.on('join_room', (data) => {
         const room = (data && data.room && String(data.room).trim()) || '';
@@ -111,7 +144,42 @@ io.on('connection', (socket) => {
         io.to(room).emit('room_message', { room, from_user, message, date_sent });
     });
 
+    socket.on('private_message', async (data) => {
+        const from_user = (data && data.from_user && String(data.from_user).trim()) || '';
+        const to_user = (data && data.to_user && String(data.to_user).trim()) || '';
+        const message = (data && data.message != null) ? String(data.message).trim() : '';
+        if (!from_user || !to_user || !message) return;
+        const date_sent = getDateSent();
+        try {
+            await PrivateMessage.create({ from_user, to_user, message, date_sent });
+        } catch (err) {
+            console.error('PrivateMessage save error:', err.message);
+            return;
+        }
+        const payload = { from_user, to_user, message, date_sent };
+        const toId = userSockets.get(to_user);
+        if (toId) io.to(toId).emit('private_message', payload);
+        socket.emit('private_message', payload);
+    });
+
+    socket.on('typing_start', (data) => {
+        const to_user = (data && data.to_user && String(data.to_user).trim()) || '';
+        const from_user = (data && data.from_user && String(data.from_user).trim()) || '';
+        if (!to_user || !from_user) return;
+        const toId = userSockets.get(to_user);
+        if (toId) io.to(toId).emit('typing_start', { from_user, to_user });
+    });
+
+    socket.on('typing_stop', (data) => {
+        const to_user = (data && data.to_user && String(data.to_user).trim()) || '';
+        const from_user = (data && data.from_user && String(data.from_user).trim()) || '';
+        if (!to_user || !from_user) return;
+        const toId = userSockets.get(to_user);
+        if (toId) io.to(toId).emit('typing_stop', { from_user, to_user });
+    });
+
     socket.on('disconnect', () => {
+        if (socket.username) userSockets.delete(socket.username);
         console.log('User disconnected:', socket.id);
     });
 });
